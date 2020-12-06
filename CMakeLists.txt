@@ -16,10 +16,12 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
 include_directories(src)
+include_directories(/home/antho-wsl/decomp/tools/capstone/include/)               
 
 add_subdirectory(src)
 
 add_library(capstone STATIC IMPORTED)
+set_property(TARGET capstone PROPERTY IMPORTED_LOCATION /home/antho-wsl/decomp/tools/capstone/libcapstone.a)
 
 set(SOURCE_FILES ${CMAKE_SOURCE_DIR}/src/util/cmdline.h main.cpp)
 
@@ -30,5 +32,4 @@ add_dependencies(dithumb elf++ dwarf++ disasm capstone)
 target_link_libraries(dithumb ${CMAKE_SOURCE_DIR}/lib/libelf++.a)
 target_link_libraries(dithumb ${CMAKE_SOURCE_DIR}/lib/libdwarf++.a)
 target_link_libraries(dithumb ${CMAKE_SOURCE_DIR}/lib/libdisasm.a)
-target_link_libraries(dithumb /usr/lib/libcapstone.a)
-
+target_link_libraries(dithumb capstone)
