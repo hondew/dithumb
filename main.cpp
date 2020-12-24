@@ -50,23 +50,18 @@ int main(int argc, char **argv) {
     }
 
     disasm::ElfDisassembler disassembler{elf_file};
-    if (!disassembler.isSymbolTableAvailable()
-        || cmd_parser.exist(config.kLinearSweep)) {
-        if (cmd_parser.exist(config.kTextSectionOnly)) {
-            disassembler.disassembleSectionUsingLinearSweep
-                (disassembler.findSectionbyName(".text"));
-        } else {
-            disassembler.disassembleCodeUsingLinearSweep();
-        }
-    } else {
-        if (cmd_parser.exist(config.kTextSectionOnly)) {
-            disassembler.disassembleSectionUsingSymbols
-                (disassembler.findSectionbyName(".text"));
-        } else {
-            disassembler.disassembleCodeUsingSymbols();
-        }
+    if (!disassembler.isSymbolTableAvailable()) {
+        fprintf(stderr, "No symbol table found.\n");
+        return 1;
     }
+    // Parse relocation table and store in disassembler
+    // disassembler.parseRelocationTable();
+    disassembler.parseSymbols();
+    disassembler.parseRelocations();
 
+    disassembler.prepareSymbols();
+
+    disassembler.disassembleCodeUsingSymbols();
 
     return 0;
 }
