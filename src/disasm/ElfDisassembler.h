@@ -83,8 +83,8 @@ private:
     bool isFunctionCall(const cs_insn *inst) const;
     bool lookupLabel(const cs_insn *inst) const;
     void extractLabels(std::vector<cs_insn>) const;
-    const relocation_t *relocationAtOffset(std::intptr_t offset) const;
-    void printInst(const csh& handle, cs_insn* inst);
+    bool relocationAtOffset(std::intptr_t offset, int section_idx, relocation_t *dest);
+    void printInst(const csh& handle, cs_insn* inst, int section_idx);
     void printData(const uint8_t **code, size_t size, size_t address);
 
     int getSectionIndex(const elf::section &sec) const;
@@ -93,10 +93,12 @@ private:
     std::map<int, std::deque<symbol_t>> symbolQueuesBySection(std::vector<symbol_t> symbols);
     std::map<int, std::vector<symbol_t>> groupSymbolsBySection(std::vector<symbol_t> symbols);
     void consumeUntilOffset(std::deque<symbol_t> &symbols, size_t offset);
-    bool nextFuncSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
+    bool nextSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
     bool nextModeSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
     bool nextDataSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
+    void filterDataSymbols();
     void filterArmSymbols();
+    void filterModeSymbols();
     void filterElfSymbols();
 
     std::string get_symbol_type(uint8_t &sym_type);
@@ -111,11 +113,15 @@ private:
     bool m_valid;
     const elf::elf* m_elf_file;
     std::vector<symbol_t> symbols;
+    std::vector<symbol_t> data_symbols;
+    std::vector<symbol_t> mode_symbols;
     std::vector<symbol_t> arm_symbols;
     std::vector<symbol_t> elf_symbols;
     std::map<int, std::deque<symbol_t>> symbolsBySection;
+    std::map<int, std::deque<symbol_t>> dataSymbolsBySection;
+    std::map<int, std::deque<symbol_t>> modeSymbolsBySection;
     std::map<int, std::deque<symbol_t>> armSymbolsBySection;
-    std::vector<relocation_t> relocations;
+    std::map<int, std::vector<relocation_t>> relocationsBySection;
 
     struct CapstoneConfig final{
         public:

@@ -13,6 +13,8 @@
 
 namespace disasm {
 
+const char * kThumbPrelude = "thumb_func_start";
+const char * kArmPrelude = "arm_func_start";
 
 class ARMCodeSymbolStrings {
 public:
@@ -91,10 +93,6 @@ ElfDisassembler::getSectionIndex(const elf::section &section) const {
 // Same as func below but uses our data structs
 void
 ElfDisassembler::disassembleFuncs(const elf::section &sec) {
-    // TODO: Make these static const constants for ElfDisassembler
-    auto thumb_prelude = "thumb_func_start";
-    auto arm_prelude = "arm_func_start";
-
     csh handle;
     initializeCapstone(&handle);
 
@@ -107,88 +105,49 @@ ElfDisassembler::disassembleFuncs(const elf::section &sec) {
     const uint8_t *code_ptr = (const uint8_t *) sec.data();
 
     auto funcs = symbolsBySection[getSectionIndex(sec)];
-    auto arm_syms = armSymbolsBySection[getSectionIndex(sec)];
+    auto data_syms = dataSymbolsBySection[getSectionIndex(sec)];
+    auto mode_syms = modeSymbolsBySection[getSectionIndex(sec)];
 
-    // size_t address = 0;
-    // int index = 0;
-    // auto mode = ARMCodeSymbol::kUnspecified;
-    // for (auto &func : funcs) { 
-    //     // Check if mode is specified or changed
-    //     auto arm_sym = getSymbolAtOffset(arm_syms, address);
-    //     if (arm_sym != NULL) {
-    //         mode = ARMCodeSymbolStrings::CodeSymbol(arm_sym->symbol_name);
-    //     }
-
-    //     if (mode == ARMCodeSymbol::kData) {
-    //         // Figure out size of data. Load into a buffer. Pretty print it. Go to next address.
-    //     }
-
-    //     auto prelude = (mode == ARMCodeSymbol::kARM) ? arm_prelude : thumb_prelude;
-    //     printf("\n\t%s %s\n", prelude, func.symbol_name.c_str());
-    //     printf("%s:\n", func.symbol_name.c_str());
-
-    //     // Get function size
-    //     auto func_end = (index < funcs.size() - 1) ? funcs[index + 1].symbol_value : last_addr;
-    //     auto size = func_end - funcs[index].symbol_value;
-
-    //     if (mode == ARMCodeSymbol::kARM)    // If we don't need `mode` for anything else, we can just place this in mode switch above 
-    //         cs_option(handle, CS_OPT_MODE, CS_MODE_ARM);
-    //     else
-    //         cs_option(handle, CS_OPT_MODE, CS_MODE_THUMB);
-    //     while (cs_disasm_iter(handle, &code_ptr, &size, &address, inst)) {
-    //         printInst(handle, inst);
-    //     }
-
-    //     address += size;
-    //     ++index;
-    // }
     for (auto &func : funcs) {
         printf("Func: %s, offset: %x\n", func.symbol_name.c_str(), func.symbol_value);
     }
-    for (auto &arm_sym : arm_syms) {
-        printf("Sym: %s, offset: %x\n", arm_sym.symbol_name.c_str(), arm_sym.symbol_value);
+    for (auto &data_sym : data_syms) {
+        printf("Data: %s, offset: %x\n", data_sym.symbol_name.c_str(), data_sym.symbol_value);
+    }
+    for (auto &mode_sym : mode_syms) {
+        printf("Mode: %s, offset: %x\n", mode_sym.symbol_name.c_str(), mode_sym.symbol_value);
     }
 
     size_t address = start_addr;
     size_t next_func_addr, next_mode_addr, next_data_addr;
+    symbol_t func_sym, mode_sym, data_sym;
     auto mode = ARMCodeSymbol::kUnspecified;
     printf("Start addr: %x, last addr: %x\n", start_addr, last_addr);
     while (address < last_addr) {
         printf("\nPiplup! Current address: %x\n", address);
-        consumeUntilOffset(funcs, address); // Possibly have to pass a reference
-        consumeUntilOffset(arm_syms, address);
+        consumeUntilOffset(funcs, address);
+        consumeUntilOffset(data_syms, address);
+        consumeUntilOffset(mode_syms, address);
 
-        symbol_t * func = NULL;
-        symbol_t * arm_sym = NULL;
-        if (!funcs.empty()) {
-            func = &funcs.front();
-            printf("Func: %s, offset: %x\n", func->symbol_name.c_str(), func->symbol_value);
-        }
-        if (!arm_syms.empty()) {
-            arm_sym = &arm_syms.front();
-            printf("Arm_sym: %s, offset: %x\n", arm_sym->symbol_name.c_str(), arm_sym->symbol_value);
-        }
         // If symbol is for current address
-        if (arm_sym && arm_sym->symbol_value == address) {
-            // ?? What if symbol is $b? Does this mess up thumb/arm? Probably best to preprocess $b's out
-            mode = ARMCodeSymbolStrings::CodeSymbol(arm_sym->symbol_name);
-            // TODO: Set option mode!!
+        if (!mode_syms.empty() && mode_syms.front().symbol_value == address) {
+            mode = ARMCodeSymbolStrings::CodeSymbol(mode_syms.front().symbol_name);
+            cs_option(handle, CS_OPT_MODE, (mode == ARMCodeSymbol::kARM) ? CS_MODE_ARM : CS_MODE_THUMB);
         }
-        if (func && func->symbol_value == address) {
-            auto prelude = (mode == ARMCodeSymbol::kARM) ? arm_prelude : thumb_prelude;
-            printf("\n\t%s %s\n", prelude, func->symbol_name.c_str());
-            printf("%s:\n", func->symbol_name.c_str());
+        if (!funcs.empty() && funcs.front().symbol_value == address) {
+            auto prelude = (mode == ARMCodeSymbol::kARM) ? kArmPrelude : kThumbPrelude;
+            printf("\n\t%s %s\n", prelude, funcs.front().symbol_name.c_str());
+            printf("%s:\n", funcs.front().symbol_name.c_str());
         }
 
-        symbol_t func_sym, mode_sym, data_sym;
         next_func_addr = next_mode_addr = next_data_addr = last_addr;
-        if (nextFuncSym(funcs, address, &func_sym)) {
+        if (nextSym(funcs, address, &func_sym)) {
             next_func_addr = func_sym.symbol_value;
         }
-        if (nextModeSym(arm_syms, address, &func_sym)) {
+        if (nextSym(mode_syms, address, &mode_sym)) {
             next_mode_addr = func_sym.symbol_value;
         }
-        if (nextDataSym(arm_syms, address, &data_sym)) {
+        if (nextSym(data_syms, address, &data_sym)) {
             next_data_addr = data_sym.symbol_value;
         }
         printf("Next func: %x\n", next_func_addr);
@@ -198,12 +157,12 @@ ElfDisassembler::disassembleFuncs(const elf::section &sec) {
         auto next_address = std::min({next_func_addr, next_mode_addr, next_data_addr});
         auto size = next_address - address;
         printf("Size: %x\n", size);
-        if (mode == ARMCodeSymbol::kData) {
+        if (!data_syms.empty() && data_syms.front().symbol_value == address) {
             printData(&code_ptr, size, address);
             code_ptr += size;
         } else {
             while (cs_disasm_iter(handle, &code_ptr, &size, &address, inst)) {
-                printInst(handle, inst);
+                printInst(handle, inst, getSectionIndex(sec));
             }
         }
 
@@ -263,7 +222,7 @@ ElfDisassembler::disassembleSectionUsingSymbols(const elf::section &sec) {
             cs_option(handle, CS_OPT_MODE, CS_MODE_THUMB);
 
         while (cs_disasm_iter(handle, &code_ptr, &size, &address, inst)) {
-            printInst(handle, inst);
+            printInst(handle, inst, getSectionIndex(sec));
             instruction_count++;
             if (isBranch(inst)) {
                 // printf("Basic block end.\n");
@@ -307,13 +266,37 @@ ElfDisassembler::getSymbolAtOffset(std::vector<symbol_t> syms, int offset) {
 }
 
 void
-ElfDisassembler::filterArmSymbols() {
+ElfDisassembler::filterDataSymbols() {
+    for(auto it = symbols.begin(); it != symbols.end();) {
+        auto sym = *it;
+        if (sym.symbol_name == ARMCodeSymbolStrings::kData()) {
+            data_symbols.push_back(sym);
+            it = symbols.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void
+ElfDisassembler::filterModeSymbols() {
     for(auto it = symbols.begin(); it != symbols.end();) {
         auto sym = *it;
         if (sym.symbol_name == ARMCodeSymbolStrings::kThumb() 
-        || sym.symbol_name == ARMCodeSymbolStrings::kARM() 
-        || sym.symbol_name == ARMCodeSymbolStrings::kData()
-        || sym.symbol_name == ARMCodeSymbolStrings::kBranch()) {
+        || sym.symbol_name == ARMCodeSymbolStrings::kARM()) {
+            mode_symbols.push_back(sym);
+            it = symbols.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void
+ElfDisassembler::filterArmSymbols() {
+    for(auto it = symbols.begin(); it != symbols.end();) {
+        auto sym = *it;
+        if (sym.symbol_name == ARMCodeSymbolStrings::kBranch()) {
             arm_symbols.push_back(sym);
             it = symbols.erase(it);
         } else {
@@ -379,7 +362,7 @@ ElfDisassembler::consumeUntilOffset(std::deque<symbol_t> &symbols, size_t offset
 }
 
 bool
-ElfDisassembler::nextFuncSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest) {
+ElfDisassembler::nextSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest) {
     for (auto it = symbols.begin(); it != symbols.end(); ++it) {
         if (it->symbol_value > offset) {
             *dest = *it;
@@ -389,37 +372,47 @@ ElfDisassembler::nextFuncSym(std::deque<symbol_t> symbols, size_t offset, symbol
     return false;
 }
 
-bool
-ElfDisassembler::nextModeSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest) {
-    for (auto it = symbols.begin(); it != symbols.end(); ++it) {
-        if (it->symbol_value <= offset)
-            continue;
-        if (it->symbol_name == ARMCodeSymbolStrings::kARM() 
-        || it->symbol_name == ARMCodeSymbolStrings::kThumb()) {
-            *dest = *it;
-            return true;
-        }
-    }
-    return false;
-}
+// bool
+// ElfDisassembler::nextModeSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest) {
+//     for (auto it = symbols.begin(); it != symbols.end(); ++it) {
+//         if (it->symbol_value <= offset)
+//             continue;
+//         if (it->symbol_name == ARMCodeSymbolStrings::kARM() 
+//         || it->symbol_name == ARMCodeSymbolStrings::kThumb()) {
+//             *dest = *it;
+//             return true;
+//         }
+//     }
+//     return false;
+// }
 
-// Find first data sym after offset
-bool
-ElfDisassembler::nextDataSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest) {
-    for (auto it = symbols.begin(); it != symbols.end(); ++it) {
-        if (it->symbol_value > offset && it->symbol_name == ARMCodeSymbolStrings::kData()) {
-            *dest = *it;
-            return true;
-        }
-    }
-    return false;
-}
+// // Find first data sym after offset
+// bool
+// ElfDisassembler::nextDataSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest) {
+//     for (auto it = symbols.begin(); it != symbols.end(); ++it) {
+//         if (it->symbol_value > offset && it->symbol_name == ARMCodeSymbolStrings::kData()) {
+//             *dest = *it;
+//             return true;
+//         }
+//     }
+//     return false;
+// }
 
 void
 ElfDisassembler::prepareSymbols() {
+    printf("Printing symbols before filtering:\n");
+    for (auto sym : symbols) {
+        printf("Symbol: %s, offset: %x\n", sym.symbol_name.c_str(), sym.symbol_value);
+    }
+
+    filterDataSymbols();
+    filterModeSymbols();
     filterArmSymbols();
     filterElfSymbols();
+    
     symbolsBySection = symbolQueuesBySection(symbols);
+    dataSymbolsBySection = symbolQueuesBySection(data_symbols);
+    modeSymbolsBySection = symbolQueuesBySection(mode_symbols);
     armSymbolsBySection = symbolQueuesBySection(arm_symbols);
 }
 
@@ -474,6 +467,7 @@ ElfDisassembler::parseSymbols() {
 // Given vector of symbols, and vector of sections, should create a vector of
 // relocation_t.
 // Must call parseSymbols() first
+// We will index relocations by the sections they correspond to
 void
 ElfDisassembler::parseRelocations() {
     int  plt_entry_size = 0;
@@ -508,9 +502,17 @@ ElfDisassembler::parseRelocations() {
             rel.relocation_plt_address = plt_vma_address + (i + 1) * plt_entry_size;
             rel.relocation_section_name = sec.get_name();
             
-            relocations.push_back(rel);
+            relocationsBySection[sec.get_hdr().info].push_back(rel);
         }
     }
+    // printf("Printing relocations:\n");
+    // for (auto &[section_id, rels] : relocationsBySection) {
+    //     printf("Section %d:\n", section_id);
+    //     for (auto rel : rels) {
+    //         printf("Relocation: %s, offset: %x\n", 
+    //             rel.relocation_symbol_name.c_str(), rel.relocation_offset);
+    //     }
+    // }
 }
 
 void
@@ -571,14 +573,16 @@ void ElfDisassembler::extractLabels(std::vector<cs_insn>) const {
 
 }
 
-const relocation_t *
-ElfDisassembler::relocationAtOffset(std::intptr_t offset) const {
+bool
+ElfDisassembler::relocationAtOffset(std::intptr_t offset, int section_idx, relocation_t *dest) {
+    auto relocations = relocationsBySection[section_idx];
     for (auto &rel : relocations) {
         if (rel.relocation_offset == offset) {
-            return &rel;
+            *dest = rel;
+            return true;
         }
     }
-    return nullptr;
+    return false;
 }
 
 void 
@@ -588,24 +592,42 @@ ElfDisassembler::printData(const uint8_t **code, size_t size, size_t address) {
     printf("hi, i'm data\n");
 }
 
+// TODO: Handle branches to addresses within the object. Requires label 
+// processing.
 void 
-ElfDisassembler::printInst(const csh &handle, cs_insn *inst) {
+ElfDisassembler::printInst(const csh &handle, cs_insn *inst, int section_idx) {
     if (isFunctionCall(inst)) {
-        if (inst->detail->arm.operands[0].imm == inst->address) {
-            // Use relocation table
-            auto rel = relocationAtOffset(inst->detail->arm.operands[0].imm);
-            if (rel != NULL) {
-                printf("0x%" PRIx64 ":\t%s\t\t%s\n",
-                    inst->address, inst->mnemonic, rel->relocation_symbol_name.c_str());
-            }
-        } else {
-            // Use symbol table
-            auto sym = getSymbolAtOffset(symbols, inst->detail->arm.operands[0].imm);
-            if (sym != NULL) {
-                printf("0x%" PRIx64 ":\t%s\t\t%s\n",
-                       inst->address, inst->mnemonic, sym->symbol_name.c_str());
-            }
+        printf("bl offset: %x\n", inst->detail->arm.operands[0].imm);
+        // Try relocation table
+        relocation_t rel;
+        if (relocationAtOffset(inst->address, section_idx, &rel)) {
+            printf("0x%" PRIx64 ":\t%s\t\t%s\n",
+                inst->address, inst->mnemonic, rel.relocation_symbol_name.c_str());
+            return;
         }
+
+        // Try symbol table
+        auto sym = getSymbolAtOffset(symbols, inst->detail->arm.operands[0].imm);
+        if (sym != NULL) {
+            printf("0x%" PRIx64 ":\t%s\t\t%s\n",
+                    inst->address, inst->mnemonic, sym->symbol_name.c_str());
+        }
+
+        // if (inst->detail->arm.operands[0].imm == inst->address) {
+        //     // Use relocation table
+        //     auto rel = relocationAtOffset(inst->detail->arm.operands[0].imm, section_idx);
+        //     if (rel != NULL) {
+        //         printf("0x%" PRIx64 ":\t%s\t\t%s\n",
+        //             inst->address, inst->mnemonic, rel->relocation_symbol_name.c_str());
+        //     }
+        // } else {
+        //     // Use symbol table
+        //     auto sym = getSymbolAtOffset(symbols, inst->detail->arm.operands[0].imm);
+        //     if (sym != NULL) {
+        //         printf("0x%" PRIx64 ":\t%s\t\t%s\n",
+        //                inst->address, inst->mnemonic, sym->symbol_name.c_str());
+        //     }
+        // }
     } else {
         printf("0x%" PRIx64 ":\t%s\t\t%s\n",
             inst->address, inst->mnemonic, inst->op_str);

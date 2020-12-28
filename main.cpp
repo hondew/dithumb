@@ -55,9 +55,9 @@ int main(int argc, char **argv) {
         return 1;
     }
     // Parse relocation table and store in disassembler
-    // disassembler.parseRelocationTable();
     disassembler.parseSymbols();
     disassembler.parseRelocations();
+    
 
     disassembler.prepareSymbols();
 
