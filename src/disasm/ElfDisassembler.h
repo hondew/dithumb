@@ -37,7 +37,7 @@ typedef struct {
 } symbol_t;
 
 typedef struct {
-    std::intptr_t relocation_offset, relocation_info, relocation_symbol_value;
+    std::intptr_t relocation_offset, relocation_info, relocation_symbol_value, relocation_addend;
     std::string   relocation_type, relocation_symbol_name, relocation_section_name;
     std::intptr_t relocation_plt_address;
 } relocation_t;
@@ -85,7 +85,8 @@ private:
     void extractLabels(std::vector<cs_insn>) const;
     bool relocationAtOffset(std::intptr_t offset, int section_idx, relocation_t *dest);
     void printInst(const csh& handle, cs_insn* inst, int section_idx);
-    void printData(const uint8_t **code, size_t size, size_t address);
+    void printFuncCall(cs_insn *inst, int section_idx);
+    void printDataPool(const uint8_t **code, size_t start_addr, size_t size, int section_idx);
 
     int getSectionIndex(const elf::section &sec) const;
     const symbol_t * getSymbolAtOffset(std::vector<symbol_t> syms, int offset);
@@ -96,14 +97,21 @@ private:
     bool nextSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
     bool nextModeSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
     bool nextDataSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
-    void filterDataSymbols();
-    void filterArmSymbols();
-    void filterModeSymbols();
-    void filterElfSymbols();
+    std::vector<symbol_t> filterDataSymbols(std::vector<symbol_t> &symbols);
+    std::vector<symbol_t> filterArmSymbols(std::vector<symbol_t> &symbols);
+    std::vector<symbol_t> filterModeSymbols(std::vector<symbol_t> &symbols);
+    std::vector<symbol_t> filterElfSymbols(std::vector<symbol_t> &symbols);
 
+    uint8_t consumeByte(const uint8_t **data);
+    uint16_t consumeShort(const uint8_t **data);
+    uint32_t consumeWord(const uint8_t **data);
+    void printDataRelocation(const uint8_t **data, relocation_t rel);
+    
     std::string get_symbol_type(uint8_t &sym_type);
     std::intptr_t get_rel_symbol_value(uint32_t &sym_idx, std::vector<symbol_t> &syms);
     std::string get_rel_symbol_name(uint32_t &sym_idx, std::vector<symbol_t> &syms);
+    bool get_rel_symbol(uint32_t sym_idx, std::vector<symbol_t> &syms, symbol_t *dest);
+    bool lookupSymbol(std::vector<symbol_t> &syms, size_t section_idx, size_t offset, symbol_t *dest);
 
     void initializeCapstone(csh *handle) const;
     std::vector<std::pair<size_t, ARMCodeSymbol>>
