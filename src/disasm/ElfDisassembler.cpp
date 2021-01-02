@@ -191,7 +191,6 @@ ElfDisassembler::disassembleFuncs(const elf::section &sec) {
     printf("Start addr: %x, last addr: %x\n", start_addr, last_addr);
     printf("\n\t.text\n");
     while (address < last_addr) {
-        printf("\nPiplup! Current address: %x\n", address);
         consumeUntilOffset(funcs, address);
         consumeUntilOffset(data_syms, address);
         consumeUntilOffset(mode_syms, address);
@@ -672,24 +671,31 @@ ElfDisassembler::consumeWord(const uint8_t **data) {
 
 void
 ElfDisassembler::printDataRelocation(const uint8_t **data, relocation_t rel) {
-    symbol_t elf_sym, internal_sym;
-    auto symbol_name = rel.relocation_symbol_name;
+    // The section the relocation symbol is in
+    symbol_t section_sym;
+    symbol_t sym;
+    char offset_str[100];
 
     // Symbol defined within this object file
-    if (get_rel_symbol(rel.relocation_info, elf_symbols, &elf_sym)) {
+    if (get_rel_symbol(rel.relocation_info, elf_symbols, &section_sym)) {
         // printf("glameow\n");
-        // printf("Sym idx: %d\n", elf_sym.symbol_index);
-
-        // Doesn't handle cases where the data points to some offset after the symbol 
-        // (e.g. https://github.com/pret/pokediamond/blob/ee1f12ce06e865f47511ba200029e0afaafa4255/arm9/asm/libVCT.s#L1967-L1968).
-        // Instead, we need to get the closest symbol before the address 
-        // relocation_addend. If it does not line up with a symbol, add the 
-        // remainder to the previous symbol.
-        if (lookupSymbol(symbols, elf_sym.symbol_index, rel.relocation_addend, &internal_sym)) {
-            // printf("purugly: refers to %s\n", internal_sym.symbol_name.c_str());
-            symbol_name = internal_sym.symbol_name;
-        }
+        // printf("Relocation addend: %x\n", rel.relocation_addend);
+        // printf("Section idx: %d\n", section_sym.symbol_index);
+        lookupSymbolAtOrBefore(symbols, section_sym.symbol_index, rel.relocation_addend, &sym);
+    } 
+    // Symbol defined externally
+    else {
+        get_rel_symbol(rel.relocation_info, symbols, &sym);
     }
+
+    auto symbol_name = sym.symbol_name;
+
+    // Offset string
+    if (rel.relocation_addend != sym.symbol_value) {
+        sprintf(offset_str, " + 0x%X", rel.relocation_addend - sym.symbol_value);
+        symbol_name += std::string(offset_str);
+    }
+
     printf("\t.word %s, sym idx: %x, addend: %x\n", 
         symbol_name.c_str(), 
         ELF32_R_SYM(rel.relocation_info),
@@ -864,6 +870,24 @@ ElfDisassembler::get_symbol_type(uint8_t &sym_type) {
     }
 }
 
+// Find the symbol at or immediately preceding the offset.
+bool
+ElfDisassembler::lookupSymbolAtOrBefore(std::vector<symbol_t> &syms, size_t section_idx, size_t offset, symbol_t *dest) {
+    auto found = false;
+    symbol_t out = {symbol_value: -1};
+    for (auto sym : syms) {
+        if (sym.symbol_index != section_idx || sym.symbol_value > offset){
+            continue;
+        }
+        if (sym.symbol_value > out.symbol_value) {
+            out = sym;
+            found = true;
+        }
+    }
+    *dest = out;
+    return found;
+}
+
 // Find a symbol at the specified offset. Assumes that `syms` are all from the same section.
 bool
 ElfDisassembler::lookupSymbol(std::vector<symbol_t> &syms, size_t section_idx, size_t offset, symbol_t *dest) {
@@ -890,7 +914,6 @@ ElfDisassembler::get_rel_symbol(uint32_t sym_idx, std::vector<symbol_t> &syms, s
 std::intptr_t 
 ElfDisassembler::get_rel_symbol_value(
                 uint32_t &sym_idx, std::vector<symbol_t> &syms) {
-    
     std::intptr_t sym_val = 0;
     for(auto &sym: syms) {
         if(sym.symbol_num == ELF32_R_SYM(sym_idx)) {

@@ -120,6 +120,7 @@ private:
     std::string get_rel_symbol_name(uint32_t &sym_idx, std::vector<symbol_t> &syms);
     bool get_rel_symbol(uint32_t sym_idx, std::vector<symbol_t> &syms, symbol_t *dest);
     bool lookupSymbol(std::vector<symbol_t> &syms, size_t section_idx, size_t offset, symbol_t *dest);
+    bool lookupSymbolAtOrBefore(std::vector<symbol_t> &syms, size_t section_idx, size_t offset, symbol_t *dest);
 
     void initializeCapstone(csh *handle) const;
     std::vector<std::pair<size_t, ARMCodeSymbol>>
