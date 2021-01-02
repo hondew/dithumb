@@ -48,9 +48,10 @@ public:
 
 ElfDisassembler::ElfDisassembler() : m_valid{false} { }
 
-ElfDisassembler::ElfDisassembler(const elf::elf &elf_file) :
+ElfDisassembler::ElfDisassembler(const elf::elf &elf_file, uint column_width) :
     m_valid{true},
     m_elf_file{&elf_file},
+    dataColumnWidth{column_width},
     m_config{} { }
 
 void
@@ -76,13 +77,15 @@ ElfDisassembler::initializeCapstone(csh *handle) const {
     cs_option(*handle, CS_OPT_DETAIL, CS_OPT_ON);
 }
 
-// Need to get the correct section index...
 int
 ElfDisassembler::getSectionIndex(const elf::section &section) const {
     int index = 0;
     for (auto &sec : m_elf_file->sections()) {
-        if (sec.get_hdr().addr == section.get_hdr().addr 
-        && sec.get_hdr().offset == section.get_hdr().offset) {
+        if (sec.get_hdr().addr  == section.get_hdr().addr 
+        && sec.get_hdr().offset == section.get_hdr().offset
+        && sec.get_hdr().size   == section.get_hdr().size
+        && sec.get_hdr().type   == section.get_hdr().type
+        && sec.get_hdr().name   == section.get_hdr().name) {
             return index;
         }
         ++index;
@@ -90,7 +93,70 @@ ElfDisassembler::getSectionIndex(const elf::section &section) const {
     return -1;
 }
 
-// Same as func below but uses our data structs
+void
+ElfDisassembler::disassembleBss(const elf::section &sec) {
+    auto start_addr = sec.get_hdr().addr;
+    auto last_addr = start_addr + sec.get_hdr().size;
+    const uint8_t *data_ptr = (const uint8_t *) sec.data();
+
+    auto syms = symbolsBySection[getSectionIndex(sec)];
+
+    symbol_t next_sym;
+    auto address = start_addr;
+    while (address < last_addr) {
+        consumeUntilOffset(syms, address);
+        printf("\n\t.global %s\n%s:\n", 
+            syms.front().symbol_name.c_str(), syms.front().symbol_name.c_str());
+
+        auto next_addr = last_addr;
+        if (nextSym(syms, address, &next_sym)) {
+            next_addr = next_sym.symbol_value;
+        }
+
+        auto size = next_addr - address;
+        printf("\t.space 0x%x\n", size);
+        address = next_addr;
+    }
+}
+
+void
+ElfDisassembler::disassembleData(const elf::section &sec) {
+    auto start_addr = sec.get_hdr().addr;
+    auto last_addr = start_addr + sec.get_hdr().size;
+    const uint8_t *data_ptr = (const uint8_t *) sec.data();
+
+    auto syms = symbolsBySection[getSectionIndex(sec)];
+
+    // for (auto sym : syms) {
+    //     printf("data symbol: %s, offset: %x\n", sym.symbol_name.c_str(), sym.symbol_value);
+    // }
+
+    symbol_t next_sym;
+    auto address = start_addr;
+    while (address < last_addr) {
+        consumeUntilOffset(syms, address);
+        printf("\n\t.global %s\n%s:\n", 
+            syms.front().symbol_name.c_str(), syms.front().symbol_name.c_str());
+
+        auto next_addr = last_addr;
+        if (nextSym(syms, address, &next_sym)) {
+            next_addr = next_sym.symbol_value;
+        }
+        printDataDump(&data_ptr, address, next_addr - address, getSectionIndex(sec));
+        address = next_addr;
+    }
+}
+
+void
+ElfDisassembler::disassembleDataSection(const elf::section &sec) {
+    printf("\n\t.section %s\n", sec.get_name().c_str());
+    if (sec.get_name() == ".bss") {
+        disassembleBss(sec);
+    } else {
+        disassembleData(sec);
+    }
+}
+
 void
 ElfDisassembler::disassembleFuncs(const elf::section &sec) {
     csh handle;
@@ -123,6 +189,7 @@ ElfDisassembler::disassembleFuncs(const elf::section &sec) {
     symbol_t func_sym, mode_sym, data_sym;
     auto mode = ARMCodeSymbol::kUnspecified;
     printf("Start addr: %x, last addr: %x\n", start_addr, last_addr);
+    printf("\n\t.text\n");
     while (address < last_addr) {
         printf("\nPiplup! Current address: %x\n", address);
         consumeUntilOffset(funcs, address);
@@ -254,16 +321,6 @@ ElfDisassembler::findSectionbyName(std::string sec_name) const {
     }
 }
 
-const symbol_t *
-ElfDisassembler::getSymbolAtOffset(std::vector<symbol_t> syms, int offset) {
-    for (auto &sym :syms) {
-        if (sym.symbol_value == offset) {
-            return &sym;
-        }
-    }
-    return NULL;
-}
-
 std::vector<symbol_t>
 ElfDisassembler::filterDataSymbols(std::vector<symbol_t> &symbols) {
     std::vector<symbol_t> filtered;
@@ -325,10 +382,14 @@ ElfDisassembler::filterElfSymbols(std::vector<symbol_t> &symbols) {
     return filtered;
 }
 
-
 bool
 ElfDisassembler::symbolCompareByOffset(symbol_t a, symbol_t b) {
     return a.symbol_value < b.symbol_value; 
+}
+
+bool
+ElfDisassembler::relocationCompareByOffset(relocation_t a, relocation_t b) {
+    return a.relocation_offset < b.relocation_offset; 
 }
 
 // Return a map[section]deque<symbols>, where the deque is sorted by offset.
@@ -377,6 +438,14 @@ ElfDisassembler::nextSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *
         }
     }
     return false;
+}
+
+void
+ElfDisassembler::prepareRelocations() {
+    // Sort each vector<relocation_t> by offset
+    for (auto &[section_id, rels] : relocationsBySection) {
+        std::sort(rels.begin(), rels.end(), relocationCompareByOffset);
+    }
 }
 
 void
@@ -444,6 +513,17 @@ ElfDisassembler::parseSymbols() {
     }
 }
 
+// Assumes relocations are sorted by offset
+bool
+ElfDisassembler::nextRel(std::vector<relocation_t> &rels, size_t offset, relocation_t *dest) {
+    for (auto it = rels.begin(); it != rels.end(); ++it) {
+        if (it->relocation_offset > offset) {
+            *dest = *it;
+            return true;
+        }
+    }
+    return false;
+}
 
 // Given vector of symbols, and vector of sections, should create a vector of
 // relocation_t.
@@ -505,8 +585,11 @@ ElfDisassembler::disassembleCodeUsingSymbols() {
         printf("File offset for section: %lx\n", sec.get_hdr().offset);
     }
     for (auto &sec : m_elf_file->sections()) {
+        printf("\n~ Disassembling section idx: %d, size: %x ~\n", getSectionIndex(sec), sec.get_hdr().size);
         if (sec.is_alloc() && sec.is_exec()) {
             disassembleFuncs(sec);
+        } else if (sec.is_alloc()) {
+            disassembleDataSection(sec);
         }
     }
 }
@@ -615,6 +698,52 @@ ElfDisassembler::printDataRelocation(const uint8_t **data, relocation_t rel) {
 }
 
 void
+ElfDisassembler::printRawBytes(const uint8_t **data, size_t size) {
+    auto end = *data + size;
+    auto column = 0;
+    while (*data < end) {
+        if (column == 0)
+            printf("\t.byte");
+        printf(" 0x%02X", consumeByte(data));
+
+        auto delimiter = (column == dataColumnWidth - 1 || *data == end) ? "\n" : ",";
+        printf(delimiter);
+        column = (column + 1) % dataColumnWidth;
+    }
+}
+
+void
+ElfDisassembler::printDataDump(const uint8_t **data, size_t start_addr, size_t size, int section_idx) {
+    auto start = *data;
+    auto end = *data + size;
+    auto last_addr = start_addr + size;
+    auto relocations = relocationsBySection[section_idx];
+
+    // printf("Relocations:\n");
+    // for (auto rel : relocations) {
+    //     printf("Relocation: %s, offset: %x\n", rel.relocation_symbol_name.c_str(), rel.relocation_offset);
+    // }
+
+    // Dumps data as .bytes, unless the data holds a relocation symbol
+    while (*data < end) {
+        auto address = start_addr + *data - start;
+        relocation_t rel;
+        if (relocationAtOffset(address, section_idx, &rel)) {
+            printDataRelocation(data, rel);
+            continue;
+        }
+
+        auto next_addr = last_addr;
+        if (nextRel(relocations, address, &rel)) {
+            if (rel.relocation_offset < last_addr) {
+                next_addr = rel.relocation_offset;
+            }
+        }
+        printRawBytes(data, next_addr - address);
+    }
+}
+
+void
 ElfDisassembler::printDataPool(const uint8_t **data, size_t start_addr, size_t size, int section_idx) {
     auto start = *data;
     auto end = *data + size;
@@ -627,7 +756,7 @@ ElfDisassembler::printDataPool(const uint8_t **data, size_t start_addr, size_t s
 
         auto spacesLeft = end - *data;
         if (spacesLeft < 2) {
-            printf("\t.byte 0x%X\n", consumeByte(data));
+            printf("\t.byte 0x%02X\n", consumeByte(data));
         } else if (spacesLeft < 4) {
             printf("\t.hword 0x%04X\n", consumeShort(data));
         } else {

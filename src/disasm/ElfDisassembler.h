@@ -57,7 +57,7 @@ public:
      * Prepares input file for disassembly.
      * Precondition: file is a valid ELF file.
      */
-    ElfDisassembler(const elf::elf& elf_file);
+    ElfDisassembler(const elf::elf& elf_file, uint columnWidth);
     virtual ~ElfDisassembler() = default;
     ElfDisassembler(const ElfDisassembler &src) = delete;
     ElfDisassembler &operator=(const ElfDisassembler &src) = delete;
@@ -67,12 +67,15 @@ public:
     void parseSymbols();
     void parseRelocations();
     void prepareSymbols();
+    void prepareRelocations();
     void disassembleCodeUsingSymbols();
     void disassembleCodeUsingLinearSweep() const;
 
     const elf::section & findSectionbyName(std::string sec_name) const;
     void print_string_hex(unsigned char *str, size_t len) const;
     bool isSymbolTableAvailable();
+    
+    void disassembleDataSection(const elf::section &sec);
     void disassembleFuncs(const elf::section &sec);
     void disassembleSectionUsingSymbols(const elf::section &sec);
     void disassembleSectionUsingLinearSweep(const elf::section &sec) const;
@@ -87,16 +90,21 @@ private:
     void printInst(const csh& handle, cs_insn* inst, int section_idx);
     void printFuncCall(cs_insn *inst, int section_idx);
     void printDataPool(const uint8_t **code, size_t start_addr, size_t size, int section_idx);
+    void printDataDump(const uint8_t **data, size_t start_addr, size_t size, int section_idx);
+    void printRawBytes(const uint8_t **data, size_t size);
+
+    void disassembleData(const elf::section &sec);
+    void disassembleBss(const elf::section &sec);
 
     int getSectionIndex(const elf::section &sec) const;
     const symbol_t * getSymbolAtOffset(std::vector<symbol_t> syms, int offset);
     static bool symbolCompareByOffset(symbol_t a, symbol_t b);
+    static bool relocationCompareByOffset(relocation_t a, relocation_t b);
     std::map<int, std::deque<symbol_t>> symbolQueuesBySection(std::vector<symbol_t> symbols);
     std::map<int, std::vector<symbol_t>> groupSymbolsBySection(std::vector<symbol_t> symbols);
     void consumeUntilOffset(std::deque<symbol_t> &symbols, size_t offset);
     bool nextSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
-    bool nextModeSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
-    bool nextDataSym(std::deque<symbol_t> symbols, size_t offset, symbol_t *dest);
+    bool nextRel(std::vector<relocation_t> &rels, size_t offset, relocation_t *dest);
     std::vector<symbol_t> filterDataSymbols(std::vector<symbol_t> &symbols);
     std::vector<symbol_t> filterArmSymbols(std::vector<symbol_t> &symbols);
     std::vector<symbol_t> filterModeSymbols(std::vector<symbol_t> &symbols);
@@ -146,6 +154,7 @@ private:
         bool details;
     };
     CapstoneConfig m_config;
+    int dataColumnWidth;
 };
 }
 

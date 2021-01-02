@@ -10,10 +10,12 @@ struct ConfigConsts {
     const std::string kFile;
     const std::string kLinearSweep;
     const std::string kTextSectionOnly;
+    const std::string kColumnWidth;
 
     ConfigConsts() : kFile{"file"},
                      kLinearSweep{"linear-sweep"},
-                     kTextSectionOnly{"text-section"} { }
+                     kTextSectionOnly{"text-section"},
+                     kColumnWidth{"column-width"} { }
 };
 
 int main(int argc, char **argv) {
@@ -29,6 +31,9 @@ int main(int argc, char **argv) {
     cmd_parser.add(config.kTextSectionOnly,
                    't',
                    "Disassembly text section only");
+    cmd_parser.add<uint>(config.kColumnWidth, 
+                    'c', "Number of bytes printed per line in data dumps",
+                    false, 16);
 
     cmd_parser.parse_check(argc, argv);
 
@@ -49,7 +54,8 @@ int main(int argc, char **argv) {
         return 3;
     }
 
-    disasm::ElfDisassembler disassembler{elf_file};
+    auto column_width = cmd_parser.get<uint>(config.kColumnWidth);
+    disasm::ElfDisassembler disassembler{elf_file, column_width};
     if (!disassembler.isSymbolTableAvailable()) {
         fprintf(stderr, "No symbol table found.\n");
         return 1;
@@ -58,8 +64,8 @@ int main(int argc, char **argv) {
     disassembler.parseSymbols();
     disassembler.parseRelocations();
     
-
     disassembler.prepareSymbols();
+    disassembler.prepareRelocations();
 
     disassembler.disassembleCodeUsingSymbols();
 
