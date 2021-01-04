@@ -29,6 +29,7 @@ add_library(
         disasm/ElfDisassembler.cpp
         disasm/BCInst.cpp
         disasm/ElfData.h
+        disasm/LabelProcessor.cpp
 )
 
 add_dependencies(disasm elf++ dwarf++)

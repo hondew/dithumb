@@ -147,6 +147,8 @@ ElfDisassembler::disassembleData(const elf::section &sec) {
     }
 }
 
+
+// Consider condensing both disassembleData and disassembleBss in here
 void
 ElfDisassembler::disassembleDataSection(const elf::section &sec) {
     printf("\n\t.section %s\n", sec.get_name().c_str());
