@@ -237,82 +237,6 @@ ElfDisassembler::disassembleFuncs(const elf::section &sec) {
     }
 }
 
-void
-ElfDisassembler::disassembleSectionUsingSymbols(const elf::section &sec) {
-    auto symbols = getCodeSymbolsForSection(sec);
-//    printf("Symbols size is %lu \n", symbols.size());
-//
-//    for (auto& symbol : symbols) {
-//        printf("Type %d, Addrd, 0x%#x \n", symbol.second, symbol.first);
-//    }
-    csh handle;
-
-    initializeCapstone(&handle);
-    size_t start_addr = sec.get_hdr().addr;
-    size_t last_addr = start_addr + sec.get_hdr().size;
-    const uint8_t *code_ptr = (const uint8_t *) sec.data();
-    cs_insn *inst;
-
-    printf("Start addr: %x, Last addr: %x\n", start_addr, last_addr);
-
-    inst = cs_malloc(handle);
-    BCInst instr(inst);
-    printf("***********************************\n");
-    printf("Section name: %s\n", sec.get_name().c_str());
-
-    // We assume that symbols are ordered by their address.
-    size_t index = 0;
-    size_t address = 0;
-    size_t size = 0;
-    size_t instruction_count = 0;
-    size_t basic_block_count = 0;
-    size_t direct_branch_count = 0;
-    for (auto &symbol : symbols) {
-        index++;
-        if (symbol.second == ARMCodeSymbol::kData) {
-            if (index < symbols.size())
-                // adjust code_ptr to start of next symbol.
-                code_ptr += (symbols[index].first - symbol.first);
-            continue;
-        }
-        address = symbol.first;
-        if (index < symbols.size())
-            size = symbols[index].first - symbol.first;
-        else
-            size = last_addr - symbol.first;
-
-        if (symbol.second == ARMCodeSymbol::kARM)
-            cs_option(handle, CS_OPT_MODE, CS_MODE_ARM);
-        else
-            // We assume that the value of code symbol type is strictly
-            // either Data, ARM, or Thumb.
-            cs_option(handle, CS_OPT_MODE, CS_MODE_THUMB);
-
-        while (cs_disasm_iter(handle, &code_ptr, &size, &address, inst)) {
-            printInst(handle, inst, getSectionIndex(sec));
-            instruction_count++;
-            if (isBranch(inst)) {
-                // printf("Basic block end.\n");
-                // printf("***********************************\n");
-                basic_block_count++;
-                if (isDirectBranch(inst)) {
-                    direct_branch_count++;
-                }
-            }
-        }
-    }
-    // printf("Instruction count: %lu\nBasic Block count: %lu\n"
-    //            "Direct jumps: %lu (%2.2f \%%)\nIndirect jumps:%lu (%2.2f \%%)\n",
-    //        instruction_count,
-    //        basic_block_count,
-    //        direct_branch_count,
-    //        ((double)direct_branch_count * 100) / (double)basic_block_count,
-    //        basic_block_count - direct_branch_count,
-    //        (double)((basic_block_count - direct_branch_count) * 100
-    //            / basic_block_count));
-    cs_close(&handle);
-}
-
 const elf::section &
 ElfDisassembler::findSectionbyName(std::string sec_name) const {
     for (auto &sec : m_elf_file->sections()) {
@@ -578,7 +502,7 @@ ElfDisassembler::parseRelocations() {
 }
 
 void
-ElfDisassembler::disassembleCodeUsingSymbols() {
+ElfDisassembler::disassemble() {
     // Inspect contents - should be own fn
     printf("ELF sections:\n");
     for (auto &sec : m_elf_file->sections()) {

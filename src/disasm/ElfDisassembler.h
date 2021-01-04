@@ -68,7 +68,7 @@ public:
     void parseRelocations();
     void prepareSymbols();
     void prepareRelocations();
-    void disassembleCodeUsingSymbols();
+    void disassemble();
     void disassembleCodeUsingLinearSweep() const;
 
     const elf::section & findSectionbyName(std::string sec_name) const;

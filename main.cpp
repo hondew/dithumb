@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
     disassembler.prepareSymbols();
     disassembler.prepareRelocations();
 
-    disassembler.disassembleCodeUsingSymbols();
+    disassembler.disassemble();
 
     return 0;
 }
